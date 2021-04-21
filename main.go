@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/nxtlytics/cloud-lifecycle-controller/controllers"
+	_ "k8s.io/legacy-cloud-providers/aws"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -81,10 +82,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	cloud, err := cloudprovider.InitCloudProvider(cloudProvider, "")
+	//cloudprovider.RegisterCloudProvider("aws", aws.Cloud)
+	//aws.CloudConfig{
+	//	Global: {
+	//		Zone: "us-west-2",
+	//	},
+	//}
+	cloud, err := cloudprovider.InitCloudProvider(cloudProvider, "./cloud.ini")
 	if err != nil {
 		setupLog.Error(err, "Unable to initalize cloud provider")
 	}
+
+	//client := clientbuilder.SimpleControllerClientBuilder{}
+	//if err != nil {
+	//	setupLog.Error(err, "Cannot create cloud client")
+	//}
+	//cloud.Initialize(client, make(chan struct{}))
 
 	instances, _ := cloud.Instances()
 

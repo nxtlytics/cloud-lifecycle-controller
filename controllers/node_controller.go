@@ -18,20 +18,20 @@ package controllers
 
 import (
 	"context"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/tools/record"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
+	cloudprovider "k8s.io/cloud-provider"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	cloudprovider "k8s.io/cloud-provider"
+	"strings"
 
 	// a bit nervous about importing something that says "legacy"...
 	//"k8s.io/legacy-cloud-providers/aws"
 	"errors"
+	"fmt"
 )
 
 const (
@@ -64,70 +64,90 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			// Request object not found, could have been deleted after reconcile request.
 			// Return and don't requeue
 			logger.V(1).Info("Node deleted while performing reconciliation step")
-			return reconcile.Result{}, nil
+			return ctrl.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
 		logger.Error(err,"Error fetching Node object from api client")
-		return reconcile.Result{}, err
+		return ctrl.Result{}, err
 	}
 
-	// filter out nodes without a ProviderID, since we can't fact check them against the cloud provider
-	if node.Spec.ProviderID != "" {
-		status, err := getNodeReadyCondition(node.Status.Conditions)
-		if err != nil {
-			logger.Error(err, "Something has gone horribly wrong.")
+	// Build the providerID before checking condition so we can verify the provider ID builder works correctly
+	providerID := node.Spec.ProviderID
+	if providerID == "" {
+		logger.V(1).Info("Node has no ProviderID, falling back to extracting instance ID from node name")
+		maybeID := strings.Split(node.Name, "-")
+		if maybeID[len(maybeID)-2] == "i" {
+			providerID = fmt.Sprintf("aws:///i-%s", maybeID[len(maybeID)-1])
+			logger.V(1).Info("Built ProviderID from node name", "providerID", providerID)
+		} else {
+			logger.V(1).Info("Unable to split instance ID from Node name, skipping")
+			return ctrl.Result{}, nil
 		}
-
-		// Operate on nodes that are not ready (ready=false) or conspicuously missing (ready=unknown)
-		switch status.Status {
-		case corev1.ConditionFalse:
-		case corev1.ConditionUnknown:
-			logger.V(1).Info("Node appears down according to APIServer, investigating", status.Status)
-
-			ref := &corev1.ObjectReference{
-				Kind:      "Node",
-				Name:      node.Name,
-				UID:       node.UID,
-				Namespace: "",
-			}
-
-			nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(context.TODO(), node.Spec.ProviderID)
-			nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(context.TODO(), node.Spec.ProviderID)
-			shouldDelete := !nodeExists || nodeShutdown
-			if err != nil {
-				logger.Error(err, "Error while fetching node status")
-			}
-
-			if !nodeExists {
-				logger.Info("Deleting node since it is no longer present in cloud provider")
-
-				r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
-					"Deleting node %s because it does not exist in the cloud provider", node.Name)
-			}
-
-			if nodeShutdown {
-				logger.Info("Node is shutdown, deleting node")
-
-				r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
-					"Deleting node %s because it is shut down in the cloud provider", node.Name)
-			}
-
-			// Nuke 'em, captain.
-			if shouldDelete {
-				if !r.DryRun {
-					err := r.Client.Delete(context.TODO(), node)
-					if err != nil {
-						logger.Error(err, "Unable to delete node")
-					}
-				} else {
-					logger.Info("Would have deleted node")
-				}
-			}
-		}
-
 	} else {
-		logger.V(1).Info("Node has no ProviderID, skipping")
+		logger.V(1).Info("Using ProviderID from node", "providerID", providerID)
 	}
+
+
+	status, err := getNodeReadyCondition(node.Status.Conditions)
+	if err != nil {
+		logger.Error(err, "Something has gone horribly wrong.")
+		return ctrl.Result{}, err
+	}
+
+	logger.V(1).Info("Node status", "status", status)
+
+	// Operate on nodes that are not ready (ready=false) or conspicuously missing (ready=unknown)
+	// TODO: does NodeTermination feature gate change the status to 'Shutdown'? If so, where's the value for that in corev1?
+	switch status.Status {
+	case corev1.ConditionFalse:
+	case corev1.ConditionUnknown:
+		logger.V(1).Info("Node appears down according to APIServer, investigating", "status", status.Status)
+
+		ref := &corev1.ObjectReference{
+			Kind:      "Node",
+			Name:      node.Name,
+			UID:       node.UID,
+			Namespace: "",
+		}
+
+		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(context.TODO(), providerID)
+		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(context.TODO(), providerID)
+		shouldDelete := !nodeExists || nodeShutdown
+
+		if err != nil {
+			logger.Error(err, "Error while fetching node status")
+			return ctrl.Result{}, err
+		}
+
+		logger.V(1).Info("Node condition matches unhealthy criteria", "nodeExists", nodeExists, "nodeShutdown", nodeShutdown, "shouldDelete", shouldDelete)
+
+		if !nodeExists {
+			logger.Info("Deleting node because it does not exist in the cloud provider")
+
+			r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
+				"Deleting node %s because it does not exist in the cloud provider", node.Name)
+		}
+
+		if nodeShutdown {
+			logger.Info("Deleting node because it is shut down in the cloud provider")
+
+			r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
+				"Deleting node %s because it is shut down in the cloud provider", node.Name)
+		}
+
+		// Nuke 'em, captain.
+		if shouldDelete {
+			if !r.DryRun {
+				err := r.Client.Delete(context.TODO(), node)
+				if err != nil {
+					logger.Error(err, "Unable to delete node")
+				}
+			} else {
+				logger.Info("Would have deleted node")
+			}
+		}
+	}
+
 
 	return ctrl.Result{}, nil
 }
@@ -139,7 +159,7 @@ func getNodeReadyCondition(status []corev1.NodeCondition) (corev1.NodeCondition,
 			return condition, nil
 		}
 	}
-	return corev1.NodeCondition{}, errors.New("unable to find NodeReady condition. something is wrong, bruh.")
+	return corev1.NodeCondition{}, errors.New("unable to find NodeReady condition. something is wrong, bruh")
 }
 
 // SetupWithManager sets up the controller with the Manager.

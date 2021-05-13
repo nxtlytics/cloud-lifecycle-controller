@@ -18,6 +18,8 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,11 +29,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strings"
-
-	// a bit nervous about importing something that says "legacy"...
-	//"k8s.io/legacy-cloud-providers/aws"
-	"errors"
-	"fmt"
 )
 
 const (
@@ -47,10 +44,6 @@ type NodeReconciler struct {
 	Scheme *runtime.Scheme
 	DryRun bool
 }
-
-//+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=core,resources=nodes/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=core,resources=nodes/finalizers,verbs=update
 
 // Recursively check the list of nodes for any nodes that need to be removed from the cluster
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -99,8 +92,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// Operate on nodes that are not ready (ready=false) or conspicuously missing (ready=unknown)
 	// TODO: does NodeTermination feature gate change the status to 'Shutdown'? If so, where's the value for that in corev1?
 	switch status.Status {
-	case corev1.ConditionFalse:
-	case corev1.ConditionUnknown:
+	case corev1.ConditionFalse, corev1.ConditionUnknown:
 		logger.V(1).Info("Node appears down according to APIServer, investigating", "status", status.Status)
 
 		ref := &corev1.ObjectReference{
@@ -126,26 +118,39 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 			r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
 				"Deleting node %s because it does not exist in the cloud provider", node.Name)
-		}
-
-		if nodeShutdown {
+		} else if nodeShutdown {
 			logger.Info("Deleting node because it is shut down in the cloud provider")
 
 			r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
 				"Deleting node %s because it is shut down in the cloud provider", node.Name)
 		}
 
-		// Nuke 'em, captain.
 		if shouldDelete {
+			// Nuke 'em, captain.
 			if !r.DryRun {
 				err := r.Client.Delete(context.TODO(), node)
 				if err != nil {
 					logger.Error(err, "Unable to delete node")
 				}
 			} else {
-				logger.Info("Would have deleted node")
+				logger.Info("Dry run: skipping node deletion")
 			}
+		} else {
+			// If kubelet on a node is turned off as part of a shutdown, the health check may mark the node as
+			// unreachable/unhealthy before the node is actually shut down in the cloud provider.
+			// If this happens, we need to schedule another check on this node in a few minutes to see if the cloud provider
+			// says the instance is missing
+			logger.Info("Requeuing reconciliation for node to let cloud status settle (node may be shutting down)")
+			return ctrl.Result{
+				Requeue: true,
+				// Below is not necessary, since controller-runtime uses a rate limiter by default
+				// which exponentially increases backoff for us automatically.
+				// We will, however, be limited to ~15 requeues effectively.
+				//RequeueAfter: 5 * time.Minute,
+			}, nil
 		}
+	default:
+		logger.V(1).Info("Node is up according to APIServer, ignoring.")
 	}
 
 

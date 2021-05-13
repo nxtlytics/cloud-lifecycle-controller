@@ -1,0 +1,5 @@
+# Set this to the kubeconfig file for the cloud-lifecycle-controller
+KUBECONFIG=
+
+# Cloud provider to use
+CLOUD=

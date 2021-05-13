@@ -1,0 +1,15 @@
+[Unit]
+Description=cloud-lifecycle-controller: remove nodes from Kubernetes when they don't exist in the cloud provider
+Documentation=https://github.com/nxtlytics/cloud-lifecycle-controller
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=kubernetes
+Restart=on-failure
+# Common environment variables
+EnvironmentFile=/etc/sysconfig/kube-common
+# For CA certs and keys
+EnvironmentFile=/etc/sysconfig/kube-pki
+EnvironmentFile=/etc/sysconfig/cloud-lifecycle-controller
+ExecStart=/usr/bin/cloud-lifecycle-controller -kubeconfig $KUBECONFIG -leader-elect -cloud $CLOUD

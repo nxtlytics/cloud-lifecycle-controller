@@ -34,7 +34,6 @@ import (
 
 	"github.com/nxtlytics/cloud-lifecycle-controller/controllers"
 	_ "k8s.io/legacy-cloud-providers/aws"
-	//+kubebuilder:scaffold:imports
 )
 
 var (
@@ -44,22 +43,24 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	//+kubebuilder:scaffold:scheme
 }
 
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
+	var leaderElectionNamespace string
 	var probeAddr string
 	var cloudProvider string
+	var cloudConfig string
 	var dryRun bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "", "Namespace to use for leader election lease")
 	flag.StringVar(&cloudProvider, "cloud", "", "Cloud provider to use [aws, azure, .")
+	flag.StringVar(&cloudConfig, "cloud-config", "", "Path to cloud provider config file")
 	flag.BoolVar(&dryRun, "dry-run", false, "Don't actually delete anything")
 	opts := zap.Options{
 		Development: true,
@@ -75,29 +76,19 @@ func main() {
 		Port:                   9443,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "503a7b74.nxtlytics.com",
+		LeaderElectionID:       "cloud-lifecycle-controller.nxtlytics.com",
+		LeaderElectionNamespace: leaderElectionNamespace,
+		DryRunClient:            dryRun,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	//cloudprovider.RegisterCloudProvider("aws", aws.Cloud)
-	//aws.CloudConfig{
-	//	Global: {
-	//		Zone: "us-west-2",
-	//	},
-	//}
-	cloud, err := cloudprovider.InitCloudProvider(cloudProvider, "./cloud.ini")
+	cloud, err := cloudprovider.InitCloudProvider(cloudProvider, cloudConfig)
 	if err != nil {
 		setupLog.Error(err, "Unable to initalize cloud provider")
 	}
-
-	//client := clientbuilder.SimpleControllerClientBuilder{}
-	//if err != nil {
-	//	setupLog.Error(err, "Cannot create cloud client")
-	//}
-	//cloud.Initialize(client, make(chan struct{}))
 
 	instances, _ := cloud.Instances()
 
@@ -112,7 +103,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
-	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

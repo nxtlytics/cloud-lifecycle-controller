@@ -1,0 +1,58 @@
+release:
+  github:
+    owner: nxtlytics
+    name: cloud-lifecycle-controller
+before:
+  hooks:
+  # Ensure that any go.mod modifications due to linters, go generate, etc are
+  # removed.
+  - go mod tidy
+  # Using Go modules intrinsically causes modifications to these files that are
+  # unfortunately unavoidable. Newer patch versions available to the CI will
+  # satisfy the same module requirements and cause additions to go.sum.
+  - git checkout -- go.sum
+builds:
+- env:
+  main: ./main.go
+  goarch:
+  - amd64
+  - arm64
+  gcflags:
+    - all=-trimpath={{.Env.GOPATH}}
+  asmflags:
+    - all=-trimpath={{.Env.GOPATH}}
+archives:
+- replacements:
+    darwin: Darwin
+    linux: Linux
+    windows: Windows
+    amd64: x86_64
+nfpms:
+- file_name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+  homepage:  https://github.com/nxtlytics/cloud-lifecycle-controller
+  description: Remove nodes from Kubernetes when they don't exist in the cloud provider
+  maintainer: nxtlytics <nxt@nxtlytics.com>
+  license: MPL-2.0
+  vendor: nxtlytics
+  bindir: "/usr/local/bin"
+  replacements:
+    amd64: x86_64
+  formats:
+  - rpm
+  empty_folders:
+  - /etc/systemd/system/cloud-lifecycle-controller.service.d
+  contents:
+    - src: deploy/cloud-lifecycle-controller.service
+      dst: /etc/systemd/system/cloud-lifecycle-controller.service
+    - src: deploy/cloud-lifecycle-controller
+      dst: /etc/sysconfig/cloud-lifecycle-controller
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'

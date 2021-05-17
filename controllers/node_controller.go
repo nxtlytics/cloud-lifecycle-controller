@@ -145,7 +145,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				Requeue: true,
 				// Below is not necessary, since controller-runtime uses a rate limiter by default
 				// which exponentially increases backoff for us automatically.
-				// We will, however, be limited to ~15 requeues effectively.
+				// See: https://github.com/operator-framework/operator-sdk/issues/4209
 				//RequeueAfter: 5 * time.Minute,
 			}, nil
 		}

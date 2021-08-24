@@ -53,7 +53,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// your logic here
 	node := &corev1.Node{}
-	err := r.Client.Get(context.TODO(), req.NamespacedName, node)
+	err := r.Client.Get(ctx, req.NamespacedName, node)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -103,8 +103,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Namespace: "",
 		}
 
-		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(context.TODO(), providerID)
-		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(context.TODO(), providerID)
+		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
+		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
 		shouldDelete := !nodeExists || nodeShutdown
 
 		if err != nil {
@@ -129,7 +129,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if shouldDelete {
 			// Nuke 'em, captain.
 			if !r.DryRun {
-				err := r.Client.Delete(context.TODO(), node)
+				err := r.Client.Delete(ctx, node)
 				if err != nil {
 					logger.Error(err, "Unable to delete node")
 				}

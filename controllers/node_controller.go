@@ -84,7 +84,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	status, err := getNodeReadyCondition(node.Status.Conditions)
 	if err != nil {
-		logger.Error(err, "Something has gone horribly wrong.")
+		logger.Error(err, "Unable to get node ready condition.")
 		return ctrl.Result{}, err
 	}
 
@@ -117,7 +117,12 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		shouldDelete := !nodeExists || nodeShutdown
 
-		logger.Info("Node condition matches unhealthy criteria", "nodeExists", nodeExists, "nodeShutdown", nodeShutdown, "shouldDelete", shouldDelete)
+		logger.Info(
+			"Node condition matches unhealthy criteria",
+			"nodeExists", nodeExists,
+			"nodeShutdown", nodeShutdown,
+			"shouldDelete", shouldDelete,
+		)
 
 		if !nodeExists {
 			logger.Info("Deleting node because it does not exist in the cloud provider")

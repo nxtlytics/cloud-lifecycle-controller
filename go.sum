@@ -788,7 +788,6 @@ k8s.io/apimachinery v0.19.2/go.mod h1:DnPGDnARWFvYa3pMHgSxtbZb7gpzzAZ1pTfaUNDVlm
 k8s.io/apimachinery v0.20.0 h1:jjzbTJRXk0unNS71L7h3lxGDH/2HPxMPaQY+MjECKL8=
 k8s.io/apimachinery v0.20.0/go.mod h1:WlLqWAHZGg07AeltaI0MV5uk1Omp8xaN0JGLY6gkRpU=
 k8s.io/apiserver v0.19.2/go.mod h1:FreAq0bJ2vtZFj9Ago/X0oNGC51GfubKK/ViOKfVAOA=
-k8s.io/apiserver v0.20.0 h1:0MwO4xCoqZwhoLbFyyBSJdu55CScp4V4sAgX6z4oPBY=
 k8s.io/apiserver v0.20.0/go.mod h1:6gRIWiOkvGvQt12WTYmsiYoUyYW0FXSiMdNl4m+sxY8=
 k8s.io/client-go v0.19.2/go.mod h1:S5wPhCqyDNAlzM9CnEdgTGV4OqhsW3jGO1UM1epwfJA=
 k8s.io/client-go v0.20.0 h1:Xlax8PKbZsjX4gFvNtt4F5MoJ1V5prDvCuoq9B7iax0=
@@ -799,7 +798,6 @@ k8s.io/code-generator v0.19.2/go.mod h1:moqLn7w0t9cMs4+5CQyxnfA/HV8MF6aAVENF+WZZ
 k8s.io/component-base v0.19.2/go.mod h1:g5LrsiTiabMLZ40AR6Hl45f088DevyGY+cCE2agEIVo=
 k8s.io/component-base v0.20.0 h1:BXGL8iitIQD+0NgW49UsM7MraNUUGDU3FBmrfUAtmVQ=
 k8s.io/component-base v0.20.0/go.mod h1:wKPj+RHnAr8LW2EIBIK7AxOHPde4gme2lzXwVSoRXeA=
-k8s.io/controller-manager v0.20.0 h1:OwUoxVhRMp3kDHjEOJ48alqBVZPlFikAZeFCqI4zyss=
 k8s.io/controller-manager v0.20.0/go.mod h1:nD4qym/pmCz2v1tpqvlEBVlHW9CAZwedloM8GrJTLpg=
 k8s.io/csi-translation-lib v0.20.0 h1:I4wsA4/nW2low2auCUIq/ZCF58/FlCADr1OddBh0AOQ=
 k8s.io/csi-translation-lib v0.20.0/go.mod h1:M4CdD66GxEI6ev8aTtsA2NkK9kIF9K5VZQMcw/SsoLs=

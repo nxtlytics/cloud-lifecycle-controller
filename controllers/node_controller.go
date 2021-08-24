@@ -104,13 +104,18 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 
 		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
-		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
-		shouldDelete := !nodeExists || nodeShutdown
+		if err != nil {
+			logger.Error(err, "Error while fetching node existence")
+			return ctrl.Result{}, err
+		}
 
+		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
 		if err != nil {
 			logger.Error(err, "Error while fetching node status")
 			return ctrl.Result{}, err
 		}
+
+		shouldDelete := !nodeExists || nodeShutdown
 
 		logger.Info("Node condition matches unhealthy criteria", "nodeExists", nodeExists, "nodeShutdown", nodeShutdown, "shouldDelete", shouldDelete)
 

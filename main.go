@@ -18,21 +18,21 @@ package main
 
 import (
 	"flag"
-	cloudprovider "k8s.io/cloud-provider"
 	"os"
+
+	"github.com/nxtlytics/cloud-lifecycle-controller/controllers"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	cloudprovider "k8s.io/cloud-provider"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	"github.com/nxtlytics/cloud-lifecycle-controller/controllers"
 	_ "k8s.io/legacy-cloud-providers/aws"
 )
 
@@ -46,13 +46,16 @@ func init() {
 }
 
 func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	var leaderElectionNamespace string
-	var probeAddr string
-	var cloudProvider string
-	var cloudConfig string
-	var dryRun bool
+	var (
+		metricsAddr             string
+		enableLeaderElection    bool
+		leaderElectionNamespace string
+		probeAddr               string
+		cloudProvider           string
+		cloudConfig             string
+		dryRun                  bool
+	)
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -70,16 +73,17 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "cloud-lifecycle-controller.nxtlytics.com",
+	ctrlOpts := ctrl.Options{
+		Scheme:                  scheme,
+		MetricsBindAddress:      metricsAddr,
+		Port:                    9443,
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          enableLeaderElection,
+		LeaderElectionID:        "cloud-lifecycle-controller.nxtlytics.com",
 		LeaderElectionNamespace: leaderElectionNamespace,
 		DryRunClient:            dryRun,
-	})
+	}
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrlOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -92,14 +96,15 @@ func main() {
 
 	instances, _ := cloud.Instances()
 
-	if err = (&controllers.NodeReconciler{
+	nodeReconciler := &controllers.NodeReconciler{
 		Recorder:       mgr.GetEventRecorderFor("cloud-lifecycle-controller"),
 		Client:         mgr.GetClient(),
 		CloudInstances: instances,
 		Log:            ctrl.Log.WithName("controllers").WithName("Node"),
 		Scheme:         mgr.GetScheme(),
 		DryRun:         dryRun,
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err = nodeReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}

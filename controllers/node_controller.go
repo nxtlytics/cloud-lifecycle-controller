@@ -20,15 +20,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	cloudprovider "k8s.io/cloud-provider"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strings"
 )
 
 const (
@@ -38,62 +40,61 @@ const (
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
-	Recorder record.EventRecorder
+	Recorder       record.EventRecorder
 	CloudInstances cloudprovider.Instances
-	Log    logr.Logger
-	Scheme *runtime.Scheme
-	DryRun bool
+	Log            logr.Logger
+	Scheme         *runtime.Scheme
+	DryRun         bool
 }
 
 // Recursively check the list of nodes for any nodes that need to be removed from the cluster
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := r.Log.WithValues("node", req.NamespacedName)
+	logger := r.Log.WithValues("node", req.NamespacedName).V(1)
 
 	// your logic here
 	node := &corev1.Node{}
-	err := r.Client.Get(context.TODO(), req.NamespacedName, node)
+	err := r.Client.Get(ctx, req.NamespacedName, node)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Return and don't requeue
-			logger.V(1).Info("Node deleted while performing reconciliation step")
+			logger.Info("Node deleted while performing reconciliation step")
 			return ctrl.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
-		logger.Error(err,"Error fetching Node object from api client")
+		logger.Error(err, "Error fetching Node object from api client")
 		return ctrl.Result{}, err
 	}
 
 	// Build the providerID before checking condition so we can verify the provider ID builder works correctly
 	providerID := node.Spec.ProviderID
 	if providerID == "" {
-		logger.V(1).Info("Node has no ProviderID, falling back to extracting instance ID from node name")
+		logger.Info("Node has no ProviderID, falling back to extracting instance ID from node name")
 		maybeID := strings.Split(node.Name, "-")
 		if maybeID[len(maybeID)-2] == "i" {
 			providerID = fmt.Sprintf("aws:///i-%s", maybeID[len(maybeID)-1])
-			logger.V(1).Info("Built ProviderID from node name", "providerID", providerID)
+			logger.Info("Built ProviderID from node name", "providerID", providerID)
 		} else {
-			logger.V(1).Info("Unable to split instance ID from Node name, skipping")
+			logger.Info("Unable to split instance ID from Node name, skipping")
 			return ctrl.Result{}, nil
 		}
 	} else {
-		logger.V(1).Info("Using ProviderID from node", "providerID", providerID)
+		logger.Info("Using ProviderID from node", "providerID", providerID)
 	}
-
 
 	status, err := getNodeReadyCondition(node.Status.Conditions)
 	if err != nil {
-		logger.Error(err, "Something has gone horribly wrong.")
+		logger.Error(err, "Unable to get node ready condition.")
 		return ctrl.Result{}, err
 	}
 
-	logger.V(1).Info("Node status", "status", status)
+	logger.Info("Node status", "status", status)
 
 	// Operate on nodes that are not ready (ready=false) or conspicuously missing (ready=unknown)
 	// TODO: does NodeTermination feature gate change the status to 'Shutdown'? If so, where's the value for that in corev1?
 	switch status.Status {
 	case corev1.ConditionFalse, corev1.ConditionUnknown:
-		logger.V(1).Info("Node appears down according to APIServer, investigating", "status", status.Status)
+		logger.Info("Node appears down according to APIServer, investigating", "status", status.Status)
 
 		ref := &corev1.ObjectReference{
 			Kind:      "Node",
@@ -102,16 +103,26 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Namespace: "",
 		}
 
-		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(context.TODO(), providerID)
-		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(context.TODO(), providerID)
-		shouldDelete := !nodeExists || nodeShutdown
+		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
+		if err != nil {
+			logger.Error(err, "Error while fetching node existence")
+			return ctrl.Result{}, err
+		}
 
+		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
 		if err != nil {
 			logger.Error(err, "Error while fetching node status")
 			return ctrl.Result{}, err
 		}
 
-		logger.V(1).Info("Node condition matches unhealthy criteria", "nodeExists", nodeExists, "nodeShutdown", nodeShutdown, "shouldDelete", shouldDelete)
+		shouldDelete := !nodeExists || nodeShutdown
+
+		logger.Info(
+			"Node condition matches unhealthy criteria",
+			"nodeExists", nodeExists,
+			"nodeShutdown", nodeShutdown,
+			"shouldDelete", shouldDelete,
+		)
 
 		if !nodeExists {
 			logger.Info("Deleting node because it does not exist in the cloud provider")
@@ -128,7 +139,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if shouldDelete {
 			// Nuke 'em, captain.
 			if !r.DryRun {
-				err := r.Client.Delete(context.TODO(), node)
+				err := r.Client.Delete(ctx, node)
 				if err != nil {
 					logger.Error(err, "Unable to delete node")
 				}
@@ -150,9 +161,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			}, nil
 		}
 	default:
-		logger.V(1).Info("Node is up according to APIServer, ignoring.")
+		logger.Info("Node is up according to APIServer, ignoring.")
 	}
-
 
 	return ctrl.Result{}, nil
 }

@@ -3,6 +3,7 @@ module github.com/nxtlytics/cloud-lifecycle-controller
 go 1.16
 
 require (
+	github.com/aws/aws-sdk-go v1.35.24
 	github.com/go-logr/logr v0.4.0
 	k8s.io/api v0.20.0
 	k8s.io/apimachinery v0.20.0

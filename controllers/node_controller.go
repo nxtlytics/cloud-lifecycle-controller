@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -105,6 +107,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
 		if err != nil {
+			if awsError, ok := err.(awserr.Error); ok {
+				logger.Error(err, "Received error ID", "code", awsError.Code())
+				if awsError.Code() == ec2.UnsuccessfulInstanceCreditSpecificationErrorCodeInvalidInstanceIdNotFound {
+					return ctrl.Result{}, err
+				}
+			}
+
 			logger.Error(err, "Error while fetching node existence")
 			return ctrl.Result{}, err
 		}

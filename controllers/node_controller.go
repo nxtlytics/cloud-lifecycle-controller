@@ -104,13 +104,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 
 		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
-		if err != nil {
+		if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
 			logger.Error(err, "Error while fetching node existence")
 			return ctrl.Result{}, err
 		}
 
 		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
-		if err != nil {
+		if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
 			logger.Error(err, "Error while fetching node status")
 			return ctrl.Result{}, err
 		}
@@ -165,6 +165,10 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func isAWSNotFoundErr(err error) bool {
+	return strings.Contains(err.Error(), "does not exist")
 }
 
 // Filter to only the NodeReady condition

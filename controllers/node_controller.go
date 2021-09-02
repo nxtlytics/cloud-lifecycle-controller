@@ -51,7 +51,6 @@ type NodeReconciler struct {
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.Log.WithValues("node", req.NamespacedName).V(1)
 
-	// your logic here
 	node := &corev1.Node{}
 	err := r.Client.Get(ctx, req.NamespacedName, node)
 	if err != nil {

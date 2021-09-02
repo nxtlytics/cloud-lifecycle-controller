@@ -167,6 +167,13 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
+// SetupWithManager sets up the controller with the Manager.
+func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&corev1.Node{}).
+		Complete(r)
+}
+
 func isAWSNotFoundErr(err error) bool {
 	return strings.Contains(err.Error(), "does not exist")
 }
@@ -179,11 +186,4 @@ func getNodeReadyCondition(status []corev1.NodeCondition) (corev1.NodeCondition,
 		}
 	}
 	return corev1.NodeCondition{}, errors.New("unable to find NodeReady condition. something is wrong, bruh")
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Node{}).
-		Complete(r)
 }

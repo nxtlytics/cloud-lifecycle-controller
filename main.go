@@ -95,7 +95,7 @@ func main() {
 	}
 
 	var cloudConfigReader io.Reader
-	if cloudProvider == "aws" && cloudConfig == "" && cloudZone != "" {
+	if cloudProvider == "aws" && cloudConfig == "" {
 		// Terrible hack here - all this is because we want to re-use the cloud-provider code from upstream K8s, however
 		// it does not include the ability to set the clusterID and vpcID since
 		// legacy-cloud-providers/aws/aws.Cloud.cfg is not exported.
@@ -103,32 +103,52 @@ func main() {
 		// create the cloudConfig object io.Reader manually to include the region and fake ClusterID/VPC/Subnet
 		// ...if you have a properly tagged cluster, this isn't necessary.
 		// TODO: will it autodetect the zone properly if we leave it blank?
+		zone := ""
+		if cloudZone == "" {
+			//sess, _ := session.NewSessionWithOptions(session.Options{})
+			//svc := ec2metadata.New(sess)
+			//zone, err = svc.GetMetadata("placement/region")
+			//if err != nil {
+			//	setupLog.Error(err, "unable to fetch region from imds, you must specify region as a cli arg instead")
+			//	os.Exit(1)
+			//}
+		} else {
+			setupLog.Info("Using cli arg zone")
+			zone = cloudZone
+		}
+
 		internalConfig := fmt.Sprintf(`
 [global]
 zone=%s
 KubernetesClusterID=FakeClusterID
 VPC=FakeVPC
 SubnetID=FakeSubnet
-`, cloudZone)
+`, zone)
 		cloudConfigReader = strings.NewReader(internalConfig)
-	} else if cloudConfig != "" && cloudZone == "" {
+	} else if cloudConfig != "" {
 		// read the cloud config file from disk per usual
 		cloudConfigReader, err = os.Open(cloudConfig)
-		 if err != nil {
-			 setupLog.Error(err,"Unable to read cloud provider configuration", "config", cloudConfig)
-			 os.Exit(1)
-		 }
+		if err != nil {
+			setupLog.Error(err, "Unable to read cloud provider configuration", "config", cloudConfig)
+			os.Exit(1)
+		}
 	} else if cloudConfig == "" {
 		// no cloud config specified, no zone override... let the library automatically init, and propagagte errors up
+		setupLog.Info("Proceeding without cloud config, relying on underlying cloud library for init")
 		cloudConfigReader = nil
 	}
 
 	cloud, err := cloudprovider.GetCloudProvider(cloudProvider, cloudConfigReader)
 	if err != nil {
 		setupLog.Error(err, "Unable to initialize cloud provider", "provider", cloudProvider)
+		os.Exit(1)
 	}
 
-	instances, _ := cloud.Instances()
+	instances, success := cloud.Instances()
+	if !success {
+		setupLog.Error(err, "Unable to set up cloud instances provider")
+		os.Exit(1)
+	}
 
 	nodeReconciler := &controllers.NodeReconciler{
 		Recorder:       mgr.GetEventRecorderFor("cloud-lifecycle-controller"),

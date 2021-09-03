@@ -43,7 +43,11 @@ to safely remove the Node object once the node is removed from the cloud provide
 ```
 Usage of cloud-lifecycle-controller:
   -cloud string
-        Cloud provider to use [aws, azure, ...]
+        Cloud provider to use (aws, azure, gcs, ...)
+  -cloud-config string
+        Path to cloud provider config file
+  -cloud-zone string
+        Cloud zone (us-west2, us-central, ...)
   -dry-run
         Don't actually delete anything
   -health-probe-bind-address string
@@ -52,6 +56,8 @@ Usage of cloud-lifecycle-controller:
         Paths to a kubeconfig. Only required if out-of-cluster.
   -leader-elect
         Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.
+  -leader-election-namespace string
+        Namespace to use for leader election lease
   -metrics-bind-address string
         The address the metric endpoint binds to. (default ":8080")
   -zap-devel

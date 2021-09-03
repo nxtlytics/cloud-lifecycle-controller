@@ -37,6 +37,29 @@ const (
 	deleteNodeEvent = "DeletingNode"
 )
 
+type providerNodeStatus int
+
+func (s providerNodeStatus) String() string {
+	switch s {
+	case providerNodeStatusShutdown:
+		return "Shutdown"
+	case providerNodeStatusNotFound:
+		return "Not Found"
+	default:
+		return "Unknown"
+	}
+}
+
+const (
+	providerNodeStatusUnknown providerNodeStatus = iota
+	providerNodeStatusShutdown
+	providerNodeStatusNotFound
+)
+
+var (
+	errProviderIDEmpty = errors.New("ProviderID is empty")
+)
+
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
@@ -65,22 +88,6 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
-	// Build the providerID before checking condition so we can verify the provider ID builder works correctly
-	providerID := node.Spec.ProviderID
-	if providerID == "" {
-		logger.Info("Node has no ProviderID, falling back to extracting instance ID from node name")
-		maybeID := strings.Split(node.Name, "-")
-		if maybeID[len(maybeID)-2] == "i" {
-			providerID = fmt.Sprintf("aws:///i-%s", maybeID[len(maybeID)-1])
-			logger.Info("Built ProviderID from node name", "providerID", providerID)
-		} else {
-			logger.Info("Unable to split instance ID from Node name, skipping")
-			return ctrl.Result{}, nil
-		}
-	} else {
-		logger.Info("Using ProviderID from node", "providerID", providerID)
-	}
-
 	status, err := getNodeReadyCondition(node.Status.Conditions)
 	if err != nil {
 		logger.Error(err, "Unable to get node ready condition.")
@@ -94,71 +101,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	switch status.Status {
 	case corev1.ConditionFalse, corev1.ConditionUnknown:
 		logger.Info("Node appears down according to APIServer, investigating", "status", status.Status)
-
-		ref := &corev1.ObjectReference{
-			Kind:      "Node",
-			Name:      node.Name,
-			UID:       node.UID,
-			Namespace: "",
-		}
-
-		nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
-		if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
-			logger.Error(err, "Error while fetching node existence")
-			return ctrl.Result{}, err
-		}
-
-		nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
-		if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
-			logger.Error(err, "Error while fetching node status")
-			return ctrl.Result{}, err
-		}
-
-		shouldDelete := !nodeExists || nodeShutdown
-
-		logger.Info(
-			"Node condition matches unhealthy criteria",
-			"nodeExists", nodeExists,
-			"nodeShutdown", nodeShutdown,
-			"shouldDelete", shouldDelete,
-		)
-
-		if !nodeExists {
-			logger.Info("Deleting node because it does not exist in the cloud provider")
-
-			r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
-				"Deleting node %s because it does not exist in the cloud provider", node.Name)
-		} else if nodeShutdown {
-			logger.Info("Deleting node because it is shut down in the cloud provider")
-
-			r.Recorder.Eventf(ref, corev1.EventTypeNormal, deleteNodeEvent,
-				"Deleting node %s because it is shut down in the cloud provider", node.Name)
-		}
-
-		if shouldDelete {
-			// Nuke 'em, captain.
-			if !r.DryRun {
-				err := r.Client.Delete(ctx, node)
-				if err != nil {
-					logger.Error(err, "Unable to delete node")
-				}
-			} else {
-				logger.Info("Dry run: skipping node deletion")
-			}
-		} else {
-			// If kubelet on a node is turned off as part of a shutdown, the health check may mark the node as
-			// unreachable/unhealthy before the node is actually shut down in the cloud provider.
-			// If this happens, we need to schedule another check on this node in a few minutes to see if the cloud provider
-			// says the instance is missing
-			logger.Info("Requeuing reconciliation for node to let cloud status settle (node may be shutting down)")
-			return ctrl.Result{
-				Requeue: true,
-				// Below is not necessary, since controller-runtime uses a rate limiter by default
-				// which exponentially increases backoff for us automatically.
-				// See: https://github.com/operator-framework/operator-sdk/issues/4209
-				//RequeueAfter: 5 * time.Minute,
-			}, nil
-		}
+		return r.reconcileNode(ctx, node, logger)
 	default:
 		logger.Info("Node is up according to APIServer, ignoring.")
 	}
@@ -173,6 +116,73 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func (r *NodeReconciler) nodeStatus(ctx context.Context, node *corev1.Node) (providerNodeStatus, error) {
+	providerID := node.Spec.ProviderID
+	if providerID == "" {
+		return providerNodeStatusUnknown, errProviderIDEmpty
+	}
+
+	nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
+	if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
+		return providerNodeStatusUnknown, err
+	}
+	if !nodeExists {
+		return providerNodeStatusNotFound, nil
+	}
+
+	nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
+	if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
+		return providerNodeStatusUnknown, err
+	}
+	if nodeShutdown {
+		return providerNodeStatusShutdown, nil
+	}
+	return providerNodeStatusUnknown, nil
+}
+
+func (r *NodeReconciler) reconcileNode(ctx context.Context, node *corev1.Node, logger logr.Logger) (ctrl.Result, error) {
+	nodeStatus, err := r.nodeStatus(ctx, node)
+	if err != nil {
+		logger.Error(err, "Unable to get node status")
+	}
+
+	if nodeStatus == providerNodeStatusUnknown {
+		// If kubelet on a node is turned off as part of a shutdown, the health check may mark the node as
+		// unreachable/unhealthy before the node is actually shut down in the cloud provider.
+		// If this happens, we need to schedule another check on this node in a few minutes to see if the cloud provider
+		// says the instance is missing
+		logger.Info("Requeuing reconciliation for node to let cloud status settle (node may be shutting down)")
+		return ctrl.Result{
+			Requeue: true,
+			// Below is not necessary, since controller-runtime uses a rate limiter by default
+			// which exponentially increases backoff for us automatically.
+			// See: https://github.com/operator-framework/operator-sdk/issues/4209
+			//RequeueAfter: 5 * time.Minute,
+		}, nil
+	}
+
+	logger.Info(
+		"Node condition matches unhealthy criteria",
+		"nodeStatus", nodeStatus.String(),
+	)
+
+	ref := newNodeRef(node)
+	msg := fmt.Sprintf("Deleting node %s because node status is %s", node.Name, nodeStatus.String())
+	logger.Info(msg)
+	r.Recorder.Event(ref, corev1.EventTypeNormal, deleteNodeEvent, msg)
+
+	// Nuke 'em, captain.
+	if !r.DryRun {
+		err := r.Client.Delete(ctx, node)
+		if err != nil {
+			logger.Error(err, "Unable to delete node")
+		}
+		return ctrl.Result{}, err
+	}
+	logger.Info("Dry run: skipping node deletion")
+	return ctrl.Result{}, nil
+}
+
 func isAWSNotFoundErr(err error) bool {
 	return strings.Contains(err.Error(), "does not exist")
 }
@@ -185,4 +195,13 @@ func getNodeReadyCondition(status []corev1.NodeCondition) (corev1.NodeCondition,
 		}
 	}
 	return corev1.NodeCondition{}, errors.New("unable to find NodeReady condition. something is wrong, bruh")
+}
+
+func newNodeRef(node *corev1.Node) *corev1.ObjectReference {
+	return &corev1.ObjectReference{
+		Kind:      "Node",
+		Name:      node.Name,
+		UID:       node.UID,
+		Namespace: "",
+	}
 }

@@ -41,13 +41,11 @@ to safely remove the Node object once the node is removed from the cloud provide
 ## Usage
 
 ```
-Usage of cloud-lifecycle-controller:
+Usage of ./cloud-lifecycle-controller:
   -cloud string
         Cloud provider to use (aws, azure, gcs, ...)
   -cloud-config string
         Path to cloud provider config file
-  -cloud-zone string
-        Cloud zone (us-west2, us-central, ...)
   -dry-run
         Don't actually delete anything
   -health-probe-bind-address string
@@ -68,7 +66,6 @@ Usage of cloud-lifecycle-controller:
         Zap Level to configure the verbosity of logging. Can be one of 'debug', 'info', 'error', or any integer value > 0 which corresponds to custom debug levels of increasing verbosity
   -zap-stacktrace-level value
         Zap Level at and above which stacktraces are captured (one of 'info', 'error').
-
 ```
 
 ## Sample log output

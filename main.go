@@ -51,7 +51,6 @@ var (
 	probeAddr               string
 	cloudProvider           string
 	cloudConfig             string
-	cloudZone               string
 	dryRun                  bool
 	opts                    zap.Options
 )
@@ -68,7 +67,6 @@ func init() {
 	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "", "Namespace to use for leader election lease")
 	flag.StringVar(&cloudProvider, "cloud", "", "Cloud provider to use (aws, azure, gcs, ...)")
 	flag.StringVar(&cloudConfig, "cloud-config", "", "Path to cloud provider config file")
-	flag.StringVar(&cloudZone, "cloud-zone", "", "Cloud zone (us-west2, us-central, ...)")
 	flag.BoolVar(&dryRun, "dry-run", false, "Don't actually delete anything")
 	opts = zap.Options{
 		Development: true,

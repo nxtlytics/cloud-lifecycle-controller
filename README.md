@@ -41,7 +41,7 @@ to safely remove the Node object once the node is removed from the cloud provide
 ## Usage
 
 ```
-Usage of ./cloud-lifecycle-controller:
+Usage of cloud-lifecycle-controller:
   -cloud string
         Cloud provider to use (aws, azure, gcs, ...)
   -cloud-config string

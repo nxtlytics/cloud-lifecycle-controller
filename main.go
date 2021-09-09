@@ -18,7 +18,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -44,38 +43,39 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+// CLI flags
+var (
+	metricsAddr             string
+	enableLeaderElection    bool
+	leaderElectionNamespace string
+	probeAddr               string
+	cloudProvider           string
+	cloudConfig             string
+	dryRun                  bool
+	opts                    zap.Options
+)
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-}
 
-func main() {
-	var (
-		metricsAddr             string
-		enableLeaderElection    bool
-		leaderElectionNamespace string
-		probeAddr               string
-		cloudProvider           string
-		cloudConfig             string
-		cloudZone               string
-		dryRun                  bool
-	)
-
+	// CLI flags
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "", "Namespace to use for leader election lease")
-	flag.StringVar(&cloudProvider, "cloud", "", "Cloud provider to use [aws, azure, .")
+	flag.StringVar(&cloudProvider, "cloud", "", "Cloud provider to use (aws, azure, gcs, ...)")
 	flag.StringVar(&cloudConfig, "cloud-config", "", "Path to cloud provider config file")
-	flag.StringVar(&cloudZone, "cloud-zone", "", "Cloud zone (us-west2, us-central, ...)")
 	flag.BoolVar(&dryRun, "dry-run", false, "Don't actually delete anything")
-	opts := zap.Options{
+	opts = zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+}
 
+func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	ctrlOpts := ctrl.Options{
@@ -95,40 +95,31 @@ func main() {
 	}
 
 	var cloudConfigReader io.Reader
-	if cloudProvider == "aws" && cloudConfig == "" && cloudZone != "" {
-		// Terrible hack here - all this is because we want to re-use the cloud-provider code from upstream K8s, however
-		// it does not include the ability to set the clusterID and vpcID since
-		// legacy-cloud-providers/aws/aws.Cloud.cfg is not exported.
-		// so, instead:
-		// create the cloudConfig object io.Reader manually to include the region and fake ClusterID/VPC/Subnet
-		// ...if you have a properly tagged cluster, this isn't necessary.
-		// TODO: will it autodetect the zone properly if we leave it blank?
-		internalConfig := fmt.Sprintf(`
-[global]
-zone=%s
-KubernetesClusterID=FakeClusterID
-VPC=FakeVPC
-SubnetID=FakeSubnet
-`, cloudZone)
-		cloudConfigReader = strings.NewReader(internalConfig)
-	} else if cloudConfig != "" && cloudZone == "" {
+	if cloudProvider == "aws" && cloudConfig == "" {
+		cloudConfigReader = strings.NewReader(awsConfig())
+	} else if cloudConfig != "" {
 		// read the cloud config file from disk per usual
 		cloudConfigReader, err = os.Open(cloudConfig)
-		 if err != nil {
-			 setupLog.Error(err,"Unable to read cloud provider configuration", "config", cloudConfig)
-			 os.Exit(1)
-		 }
-	} else if cloudConfig == "" {
+		if err != nil {
+			setupLog.Error(err, "Unable to read cloud provider configuration", "config", cloudConfig)
+			os.Exit(1)
+		}
+	} else {
 		// no cloud config specified, no zone override... let the library automatically init, and propagagte errors up
-		cloudConfigReader = nil
+		setupLog.Info("Proceeding without cloud config, relying on underlying cloud library for init")
 	}
 
 	cloud, err := cloudprovider.GetCloudProvider(cloudProvider, cloudConfigReader)
 	if err != nil {
 		setupLog.Error(err, "Unable to initialize cloud provider", "provider", cloudProvider)
+		os.Exit(1)
 	}
 
-	instances, _ := cloud.Instances()
+	instances, success := cloud.Instances()
+	if !success {
+		setupLog.Error(err, "Unable to set up cloud instances provider")
+		os.Exit(1)
+	}
 
 	nodeReconciler := &controllers.NodeReconciler{
 		Recorder:       mgr.GetEventRecorderFor("cloud-lifecycle-controller"),
@@ -157,4 +148,15 @@ SubnetID=FakeSubnet
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// awsConfig is basically just a mock config so aws will continue without a config.
+func awsConfig() string {
+	return `
+[global]
+zone=
+KubernetesClusterID=FakeClusterID
+VPC=FakeVPC
+SubnetID=FakeSubnet
+`
 }

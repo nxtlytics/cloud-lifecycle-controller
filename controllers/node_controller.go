@@ -152,13 +152,7 @@ func (r *NodeReconciler) reconcileNode(ctx context.Context, node *corev1.Node, l
 		// If this happens, we need to schedule another check on this node in a few minutes to see if the cloud provider
 		// says the instance is missing
 		logger.Info("Requeuing reconciliation for node to let cloud status settle (node may be shutting down)")
-		return ctrl.Result{
-			Requeue: true,
-			// Below is not necessary, since controller-runtime uses a rate limiter by default
-			// which exponentially increases backoff for us automatically.
-			// See: https://github.com/operator-framework/operator-sdk/issues/4209
-			//RequeueAfter: 5 * time.Minute,
-		}, nil
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	logger.Info(

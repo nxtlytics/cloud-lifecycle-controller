@@ -1,8 +1,9 @@
 [Unit]
 Description=cloud-lifecycle-controller: remove nodes from Kubernetes when they don't exist in the cloud provider
 Documentation=https://github.com/nxtlytics/cloud-lifecycle-controller
-Wants=network-online.target
-After=network-online.target
+
+[Install]
+WantedBy=multi-user.target
 
 [Service]
 User=kubernetes

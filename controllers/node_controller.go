@@ -74,7 +74,7 @@ type nodeReconciler struct {
 func RegisterNodeReconciler(mgr manager.Manager, cloud cloudprovider.Interface, dryRun bool) error {
 	instances, success := cloud.Instances()
 	if !success {
-		return errors.New("Unable to set up cloud instances provider")
+		return errors.New("unable to set up cloud instances provider")
 	}
 
 	r := &nodeReconciler{
@@ -86,11 +86,7 @@ func RegisterNodeReconciler(mgr manager.Manager, cloud cloudprovider.Interface, 
 		dryRun:         dryRun,
 	}
 
-	if err := r.setupWithManager(mgr); err != nil {
-		return err
-	}
-
-	return nil
+	return r.setupWithManager(mgr)
 }
 
 // Recursively check the list of nodes for any nodes that need to be removed from the cluster

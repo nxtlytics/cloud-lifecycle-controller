@@ -63,6 +63,7 @@ var (
 
 // nodeReconciler reconciles a Node object
 type nodeReconciler struct {
+	cloud          cloudprovider.Interface
 	client         client.Client
 	recorder       record.EventRecorder
 	cloudInstances cloudprovider.Instances
@@ -78,6 +79,7 @@ func RegisterNodeReconciler(mgr manager.Manager, cloud cloudprovider.Interface, 
 	}
 
 	r := &nodeReconciler{
+		cloud:          cloud,
 		recorder:       mgr.GetEventRecorderFor("cloud-lifecycle-controller"),
 		client:         mgr.GetClient(),
 		cloudInstances: instances,
@@ -135,10 +137,19 @@ func (r *nodeReconciler) setupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func (r *nodeReconciler) getProviderID(node *corev1.Node) (string, error) {
+	id := node.Spec.ProviderID
+	if id != "" {
+		return id, nil
+	}
+
+	return generateProviderID(r.cloud, node)
+}
+
 func (r *nodeReconciler) nodeStatus(ctx context.Context, node *corev1.Node) (providerNodeStatus, error) {
-	providerID := node.Spec.ProviderID
-	if providerID == "" {
-		return providerNodeStatusUnknown, errProviderIDEmpty
+	providerID, err := r.getProviderID(node)
+	if err != nil {
+		return providerNodeStatusUnknown, err
 	}
 
 	nodeExists, err := r.cloudInstances.InstanceExistsByProviderID(ctx, providerID)

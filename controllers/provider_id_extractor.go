@@ -64,6 +64,7 @@ func awsProviderIDBuilder(_ cloudprovider.Interface, node *corev1.Node) (string,
 	return fmt.Sprintf("aws:///%s-%s", parts[2], parts[3]), nil
 }
 
+// azureProviderIDBuilder attempts to build a Azure ProviderID.
 func azureProviderIDBuilder(cloud cloudprovider.Interface, node *corev1.Node) (string, error) {
 	name := node.Name
 	azCloud, ok := cloud.(*azure.Cloud)

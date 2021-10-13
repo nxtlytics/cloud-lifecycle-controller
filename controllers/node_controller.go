@@ -68,6 +68,7 @@ type nodeReconciler struct {
 	dryRun         bool
 }
 
+// RegisterNodeReconciler creates and registers the node reconciler.
 func RegisterNodeReconciler(mgr manager.Manager, cloud cloudprovider.Interface, dryRun bool) error {
 	instances, success := cloud.Instances()
 	if !success {

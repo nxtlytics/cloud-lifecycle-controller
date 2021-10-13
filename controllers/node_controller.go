@@ -57,10 +57,6 @@ const (
 	providerNodeStatusNotFound
 )
 
-var (
-	errProviderIDEmpty = errors.New("ProviderID is empty")
-)
-
 // nodeReconciler reconciles a Node object
 type nodeReconciler struct {
 	cloud          cloudprovider.Interface

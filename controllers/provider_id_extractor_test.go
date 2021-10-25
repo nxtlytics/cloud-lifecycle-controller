@@ -80,7 +80,8 @@ func TestExtractAzureVMID(t *testing.T) {
 		{have: "aks-agentpool-34751183-vmss000001", want: "1"},
 		{have: "aks-agentpool-34751183-vmss001001", want: "1001"},
 		{have: "aks-agentpool-34751183-vmss999999", want: "999999"},
-		{have: "aks-agentpool-34751183-vmssMyCustomName", want: "", wantErr: ErrInvalidVMName},
+		{have: "aks-agentpool-34751183-vmss00002D", want: "2D"},
+		{have: "2D", want: "", wantErr: ErrInvalidVMName},
 	}
 
 	for _, test := range tests {

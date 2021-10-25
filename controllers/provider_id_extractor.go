@@ -105,11 +105,17 @@ func azureProviderIDBuilder(cloud cloudprovider.Interface, node *corev1.Node) (s
 //    1001
 // error will always be ErrInvalidVMName.
 func extractAzureVMID(name string) (string, error) {
-	u, err := strconv.ParseUint(name[len(name)-6:], 10, 64)
+	// Azure names are padded with leading zeros so there should always be
+	// at least six alphanumeric characters.
+	if len(name) < 6 {
+		return "", ErrInvalidVMName
+	}
+	id := name[len(name)-6:]
+	i, err := strconv.ParseInt(id, 36, 64)
 	if err != nil {
 		return "", ErrInvalidVMName
 	}
-	return strconv.FormatUint(u, 10), nil
+	return strings.ToUpper(strconv.FormatInt(i, 36)), nil
 }
 
 // extractAzureScaleSet takes a machine name and returns the scale set.

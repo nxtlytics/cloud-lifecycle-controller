@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -56,26 +57,43 @@ const (
 	providerNodeStatusNotFound
 )
 
-var (
-	errProviderIDEmpty = errors.New("ProviderID is empty")
-)
+// nodeReconciler reconciles a Node object
+type nodeReconciler struct {
+	cloud          cloudprovider.Interface
+	client         client.Client
+	recorder       record.EventRecorder
+	cloudInstances cloudprovider.Instances
+	log            logr.Logger
+	scheme         *runtime.Scheme
+	dryRun         bool
+}
 
-// NodeReconciler reconciles a Node object
-type NodeReconciler struct {
-	client.Client
-	Recorder       record.EventRecorder
-	CloudInstances cloudprovider.Instances
-	Log            logr.Logger
-	Scheme         *runtime.Scheme
-	DryRun         bool
+// RegisterNodeReconciler creates and registers the node reconciler.
+func RegisterNodeReconciler(mgr manager.Manager, cloud cloudprovider.Interface, dryRun bool) error {
+	instances, success := cloud.Instances()
+	if !success {
+		return errors.New("unable to set up cloud instances provider")
+	}
+
+	r := &nodeReconciler{
+		cloud:          cloud,
+		recorder:       mgr.GetEventRecorderFor("cloud-lifecycle-controller"),
+		client:         mgr.GetClient(),
+		cloudInstances: instances,
+		log:            ctrl.Log.WithName("controllers").WithName("Node"),
+		scheme:         mgr.GetScheme(),
+		dryRun:         dryRun,
+	}
+
+	return r.setupWithManager(mgr)
 }
 
 // Recursively check the list of nodes for any nodes that need to be removed from the cluster
-func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := r.Log.WithValues("node", req.NamespacedName).V(1)
+func (r *nodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := r.log.WithValues("node", req.NamespacedName).V(1)
 
 	node := &corev1.Node{}
-	err := r.Client.Get(ctx, req.NamespacedName, node)
+	err := r.client.Get(ctx, req.NamespacedName, node)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -109,20 +127,29 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+// setupWithManager sets up the controller with the Manager.
+func (r *nodeReconciler) setupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Node{}).
 		Complete(r)
 }
 
-func (r *NodeReconciler) nodeStatus(ctx context.Context, node *corev1.Node) (providerNodeStatus, error) {
-	providerID := node.Spec.ProviderID
-	if providerID == "" {
-		return providerNodeStatusUnknown, errProviderIDEmpty
+func (r *nodeReconciler) getProviderID(node *corev1.Node) (string, error) {
+	id := node.Spec.ProviderID
+	if id != "" {
+		return id, nil
 	}
 
-	nodeExists, err := r.CloudInstances.InstanceExistsByProviderID(ctx, providerID)
+	return generateProviderID(r.cloud, node)
+}
+
+func (r *nodeReconciler) nodeStatus(ctx context.Context, node *corev1.Node) (providerNodeStatus, error) {
+	providerID, err := r.getProviderID(node)
+	if err != nil {
+		return providerNodeStatusUnknown, err
+	}
+
+	nodeExists, err := r.cloudInstances.InstanceExistsByProviderID(ctx, providerID)
 	if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
 		return providerNodeStatusUnknown, err
 	}
@@ -130,7 +157,7 @@ func (r *NodeReconciler) nodeStatus(ctx context.Context, node *corev1.Node) (pro
 		return providerNodeStatusNotFound, nil
 	}
 
-	nodeShutdown, err := r.CloudInstances.InstanceShutdownByProviderID(ctx, providerID)
+	nodeShutdown, err := r.cloudInstances.InstanceShutdownByProviderID(ctx, providerID)
 	if err != nil && !isAWSNotFoundErr(err) { // This is a hack to work around aws bug
 		return providerNodeStatusUnknown, err
 	}
@@ -140,7 +167,7 @@ func (r *NodeReconciler) nodeStatus(ctx context.Context, node *corev1.Node) (pro
 	return providerNodeStatusUnknown, nil
 }
 
-func (r *NodeReconciler) reconcileNode(ctx context.Context, node *corev1.Node, logger logr.Logger) (ctrl.Result, error) {
+func (r *nodeReconciler) reconcileNode(ctx context.Context, node *corev1.Node, logger logr.Logger) (ctrl.Result, error) {
 	nodeStatus, err := r.nodeStatus(ctx, node)
 	if err != nil {
 		logger.Error(err, "Unable to get node status")
@@ -163,11 +190,11 @@ func (r *NodeReconciler) reconcileNode(ctx context.Context, node *corev1.Node, l
 	ref := newNodeRef(node)
 	msg := fmt.Sprintf("Deleting node %s because node status is %s", node.Name, nodeStatus.String())
 	logger.Info(msg)
-	r.Recorder.Event(ref, corev1.EventTypeNormal, deleteNodeEvent, msg)
+	r.recorder.Event(ref, corev1.EventTypeNormal, deleteNodeEvent, msg)
 
 	// Nuke 'em, captain.
-	if !r.DryRun {
-		err := r.Client.Delete(ctx, node)
+	if !r.dryRun {
+		err := r.client.Delete(ctx, node)
 		if err != nil {
 			logger.Error(err, "Unable to delete node")
 		}

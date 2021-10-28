@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -36,6 +37,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "k8s.io/legacy-cloud-providers/aws"
+	_ "k8s.io/legacy-cloud-providers/azure"
 )
 
 var (
@@ -88,9 +90,9 @@ func main() {
 		LeaderElectionNamespace: leaderElectionNamespace,
 		DryRunClient:            dryRun,
 	}
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrlOpts)
+	mgr, err := newManager(ctrlOpts)
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to create manager")
 		os.Exit(1)
 	}
 
@@ -115,31 +117,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	instances, success := cloud.Instances()
-	if !success {
-		setupLog.Error(err, "Unable to set up cloud instances provider")
-		os.Exit(1)
-	}
-
-	nodeReconciler := &controllers.NodeReconciler{
-		Recorder:       mgr.GetEventRecorderFor("cloud-lifecycle-controller"),
-		Client:         mgr.GetClient(),
-		CloudInstances: instances,
-		Log:            ctrl.Log.WithName("controllers").WithName("Node"),
-		Scheme:         mgr.GetScheme(),
-		DryRun:         dryRun,
-	}
-	if err = nodeReconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Node")
-		os.Exit(1)
-	}
-
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
-	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+	if err := controllers.RegisterNodeReconciler(mgr, cloud, dryRun); err != nil {
+		setupLog.Error(err, "unable to register reconciler", "controller", "Node")
 		os.Exit(1)
 	}
 
@@ -159,4 +138,18 @@ KubernetesClusterID=FakeClusterID
 VPC=FakeVPC
 SubnetID=FakeSubnet
 `
+}
+
+func newManager(opts ctrl.Options) (manager.Manager, error) {
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return nil, err
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return nil, err
+	}
+	return mgr, nil
 }

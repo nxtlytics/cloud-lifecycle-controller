@@ -13,4 +13,4 @@ EnvironmentFile=/etc/sysconfig/kube-common
 # For CA certs and keys
 EnvironmentFile=/etc/sysconfig/kube-pki
 EnvironmentFile=/etc/sysconfig/cloud-lifecycle-controller
-ExecStart=/usr/bin/cloud-lifecycle-controller -kubeconfig $KUBECONFIG -leader-elect -cloud $CLOUD
+ExecStart=/usr/local/bin/cloud-lifecycle-controller -kubeconfig $KUBECONFIG -leader-elect -cloud $CLOUD

@@ -3,3 +3,6 @@ KUBECONFIG=
 
 # Cloud provider to use
 CLOUD=
+
+# Kubernetes namespace to use for leader election lease
+LEADER_ELECTION_NAMESPACE=kube-system
